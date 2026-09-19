@@ -1,6 +1,6 @@
 <div align="center">
 
-# 📋✅ Tester Manager
+# 📋 Tester Manager
 
 **Publish acceptance tests. Watch testers answer them live.**
 
