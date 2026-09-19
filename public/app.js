@@ -304,7 +304,6 @@ function theirConcern(c) {
     </div>
     <div class="card-body">
       ${c.comments ? `<p class="pre feedback folded">${esc(c.comments)}</p>` : ''}
-      <div class="concern-extras">${thumbs(concernImages(c.id), false)}</div>
       <div class="status-row">
         <div class="seg" role="radiogroup" aria-label="Status of ${esc(c.title)}">
           ${CONCERN_STATUS.map(([v, label, cls]) => `<label class="${cls}">
@@ -312,6 +311,7 @@ function theirConcern(c) {
           </label>`).join('')}
         </div>
       </div>
+      <div class="concern-extras">${thumbs(concernImages(c.id), false)}</div>
       <div class="card-actions">
         <button type="button" class="link" data-hide-concern="${c.id}">${c.hidden ? 'Unhide' : 'Hide'}</button>
         <button type="button" class="link danger" data-del-concern="${c.id}">Delete</button>

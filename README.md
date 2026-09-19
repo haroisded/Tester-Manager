@@ -172,7 +172,6 @@ server.js        API, auth, database and live updates (Server-Sent Events)
 md.js            Test document parser and Markdown renderer
 public/          The web app: pages, scripts and styles
 sample-structure/  Example test document
-image-sample/    Reference screenshots
 uploads/         Screenshots testers attach (kept empty in git)
 ```
 
