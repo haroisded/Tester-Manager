@@ -1,4 +1,4 @@
-// Testing Manager client: hash router, answer sheets, live updates over Server-Sent Events.
+// Tester Manager client: hash router, answer sheets, live updates over Server-Sent Events.
 const TAB = Math.random().toString(36).slice(2); // tags our own writes so we can ignore their echo
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);

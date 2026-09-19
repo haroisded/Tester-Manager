@@ -70,7 +70,7 @@ npm start
 You should see:
 
 ```
-Testing Manager running at http://localhost:3000
+Tester Manager running at http://localhost:3000
 ```
 
 Open **http://localhost:3000** in your browser.

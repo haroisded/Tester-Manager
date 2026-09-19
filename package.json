@@ -1,7 +1,7 @@
 {
-  "name": "testing-manager",
+  "name": "tester-manager",
   "private": true,
-  "description": "Small testing manager: admin publishes tests, testers answer them live.",
+  "description": "Small tester manager: admin publishes tests, testers answer them live.",
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning server.js",
     "check": "node md.js"

@@ -526,7 +526,7 @@ textarea.folded { max-height: calc(3lh + 10px); padding-bottom: 0; mask-image: n
   .card-body { padding: 12px; }
 }
 @media (max-width: 419px) {
-  .brand span { display: none; } /* "Testing" alone keeps the admin's nav on one line */
+  .brand span { display: none; } /* "Tester" alone keeps the admin's nav on one line */
   .top-inner { gap: 8px; }
   .nav a { padding: 4px 8px; font-size: 11px; }
 }

@@ -1,4 +1,4 @@
-// Testing Manager server: Express + built-in node:sqlite, live updates over Server-Sent Events.
+// Tester Manager server: Express + built-in node:sqlite, live updates over Server-Sent Events.
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -160,7 +160,7 @@ function readCreds() {
 }
 function writeCreds({ username, password }) {
   fs.writeFileSync(CREDS, [
-    'Testing Manager admin login (plain text, for the programmer only).',
+    'Tester Manager admin login (plain text, for the programmer only).',
     'Edit these two lines and restart the server to change it.',
     '',
     `username: ${username}`,
@@ -665,6 +665,6 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Testing Manager running at http://localhost:${PORT}`);
+  console.log(`Tester Manager running at http://localhost:${PORT}`);
   console.log(`Admin login: ${CREDS}`);
 });
