@@ -84,7 +84,6 @@ const router = safe(async () => {
   if (next.name !== route.name || next.id !== route.id) {
     viewing = null;
     filter = 'all';
-    confirmingDelete = null;
     search = '';
     page = 1;
     routeChanged = true;
@@ -177,14 +176,13 @@ function pager(pages) {
 // ---------- users (admin) ----------
 let users = [];
 const shownPasswords = new Set(); // user ids whose password the admin revealed
-let confirmingDelete = null;      // user id with the inline "Delete?" step open
 
 async function showUsers() {
   users = await api('/api/users');
   if (route.name === 'users') renderUsers();
 }
 
-// Drawn from state, so live presence updates keep revealed passwords and an open delete step.
+// Drawn from state, so live presence updates keep revealed passwords.
 function renderUsers() {
   const online = users.filter(u => u.online).length;
   paint(`
@@ -198,15 +196,11 @@ function renderUsers() {
         ${u.is_admin ? '<span class="tag boxed">Admin</span>' : ''}
         <span class="presence ${u.online ? 'on' : ''}">${u.online ? 'Online' : 'Offline'}</span>
       </div>
-      ${u.is_admin ? '' : confirmingDelete === u.id ? `<div class="confirm">
-        <span>Delete <b>${esc(u.username)}</b> with all their answers, problems and images?</span>
-        <button class="btn small danger" data-del-user="${u.id}">Delete</button>
-        <button class="btn small" data-cancel-del>Cancel</button>
-      </div>` : `<div class="secret">
+      ${u.is_admin ? '' : `<div class="secret">
         ${u.password == null ? '<span class="muted">Password shows after their next sign-in</span>' : `
           <code>${shownPasswords.has(u.id) ? esc(u.password) : '••••••••'}</code>
           <button class="btn small" data-show-pass="${u.id}">${shownPasswords.has(u.id) ? 'Hide' : 'Show'}</button>`}
-        <button class="link danger" data-ask-del="${u.id}">Delete</button>
+        <button class="link danger" data-del-user="${u.id}">Delete</button>
       </div>`}
     </li>`).join('')}</ul>`);
 }
@@ -837,20 +831,10 @@ main.addEventListener('click', safe(async e => {
     if (!shownPasswords.delete(id)) shownPasswords.add(id);
     return renderUsers();
   }
-  if ((el = t.closest('[data-ask-del]'))) {
-    confirmingDelete = Number(el.dataset.askDel);
-    return renderUsers();
-  }
-  if (t.closest('[data-cancel-del]')) {
-    confirmingDelete = null;
-    return renderUsers();
-  }
   if ((el = t.closest('[data-del-user]'))) {
     const name = users.find(u => u.id === Number(el.dataset.delUser))?.username;
-    el.disabled = true;
+    if (!(await ask(`Delete ${name}?`, 'Their account goes, along with all their answers, problems, concerns and images. This cannot be undone.'))) return;
     await api(`/api/users/${el.dataset.delUser}`, { method: 'DELETE' });
-    confirmingDelete = null;
-    toast(`${name} deleted`);
     return showUsers();
   }
   if ((el = t.closest('[data-del-suite]'))) {
