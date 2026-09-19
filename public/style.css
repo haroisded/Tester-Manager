@@ -342,9 +342,15 @@ main.wide { max-width: 1120px; }
 textarea.folded { max-height: calc(3lh + 10px); padding-bottom: 0; mask-image: none; }
 .feedback.folded { max-height: calc(3lh + 4px); }                    /* + its padding */
 .more { display: block; margin-top: 6px; }
-/* concern comments keep a fixed 3-line box; the notepad is where they are written and read in full */
+/* concern comments keep a fixed 2-line box; the notepad is where they are written and read in full */
 .concern-text { resize: none; }
-.notepad-btn { display: block; margin: 6px 0 0 auto; }
+[data-concern] .feedback.folded { max-height: calc(2lh + 4px); }
+/* images on the left, "Open in notepad" on the right, both starting on the same line */
+.concern-extras { display: flex; align-items: flex-start; gap: 12px; margin-top: 10px; }
+.concern-extras:empty { display: none; }
+.concern-extras .thumbs { margin-top: 0; }
+.concern-extras .add-link, .notepad-btn { line-height: 20px; }
+.notepad-btn { flex: none; margin-left: auto; }
 .title-input {
   flex: 1; min-width: 0; padding: 2px 0; border: 0; border-bottom: 1px dashed var(--muted); border-radius: 0;
   background: none; font: 700 13px/1.4 var(--mono); color: inherit;

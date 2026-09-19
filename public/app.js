@@ -282,9 +282,8 @@ function myConcern(c) {
       ${concernTag(c)}
     </div>
     <div class="card-body">
-      <textarea class="concern-text" rows="3" placeholder="Comments (optional)" aria-label="Comments">${esc(c.comments)}</textarea>
-      ${NOTEPAD}
-      ${thumbs(concernImages(c.id), true)}
+      <textarea class="concern-text" rows="2" placeholder="Comments (optional)" aria-label="Comments">${esc(c.comments)}</textarea>
+      <div class="concern-extras">${thumbs(concernImages(c.id), true)}${NOTEPAD}</div>
       ${c.state === 'saved' ? '' : '<p class="hint">Only you can see drafts. Save to send it to the admin.</p>'}
       <div class="actions">
         <button type="button" class="btn small primary" data-act="saved">Save</button>
@@ -304,8 +303,8 @@ function theirConcern(c) {
       ${concernTag(c)}
     </div>
     <div class="card-body">
-      ${c.comments ? `<p class="pre feedback folded">${esc(c.comments)}</p>${NOTEPAD}` : ''}
-      ${thumbs(concernImages(c.id), false)}
+      ${c.comments ? `<p class="pre feedback folded">${esc(c.comments)}</p>` : ''}
+      <div class="concern-extras">${thumbs(concernImages(c.id), false)}${c.comments ? NOTEPAD : ''}</div>
       <div class="status-row">
         <div class="seg" role="radiogroup" aria-label="Status of ${esc(c.title)}">
           ${CONCERN_STATUS.map(([v, label, cls]) => `<label class="${cls}">
@@ -1114,7 +1113,6 @@ function openNotepad(row) {
   $('#notepad-read').hidden = !me.is_admin;
   if (me.is_admin) $('#notepad-read').textContent = c.comments;
   else $('#notepad-text').value = $('textarea', row).value;
-  $('#notepad-hint').textContent = me.is_admin ? `By ${C.testers.find(u => u.id === c.user_id)?.username ?? 'a tester'}` : 'Saves as you type';
   $('#notepad').showModal();
 }
 $('#notepad-text').addEventListener('input', e => {
