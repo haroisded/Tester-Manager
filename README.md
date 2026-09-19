@@ -117,6 +117,9 @@ Short intro shown above the tests.
 ### What will be tested?
 That tapping **Resources** only shows or hides the screens under it.
 
+### What do you need before starting?
+- Signed in, on a phone.
+
 ### Steps
 1. Open the side menu.
 2. Tap **Resources**.
@@ -129,6 +132,19 @@ That tapping **Resources** only shows or hides the screens under it.
 
 It supports headings, `-` and `1.` lists, **bold** and paragraphs. See
 [`sample-structure/resources.md`](sample-structure/resources.md) for a full example.
+
+> [!IMPORTANT]
+> **Admins: when you paste or upload a `.md` file, copy the format and structure of
+> [`sample-structure/resources.md`](sample-structure/resources.md) exactly.**
+>
+> - Start with one `# Title` line. An optional short intro can follow it.
+> - Start every test with `## Test N - Title: …`, written exactly like that and numbered 1, 2, 3 and so on.
+> - Inside each test, use these four `###` headings, spelled exactly as shown and in this order:
+>   `What will be tested?`, `What do you need before starting?`, `Steps`, `What's the expected output?`
+> - Write steps as a numbered list (`1.`) and expected results as a `-` list.
+>
+> If a test heading doesn't match, the document won't publish. If a section heading is spelled differently,
+> that section won't appear in its proper place.
 
 ---
 

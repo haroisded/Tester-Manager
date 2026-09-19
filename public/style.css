@@ -349,7 +349,7 @@ textarea.folded { max-height: calc(3lh + 10px); padding-bottom: 0; mask-image: n
 .concern-extras { display: flex; align-items: flex-start; gap: 12px; margin-top: 10px; }
 .concern-extras:empty { display: none; }
 .concern-extras .thumbs { margin-top: 0; }
-.concern-extras .add-link, .notepad-btn { line-height: 20px; }
+.concern-extras .add-link, .concern-extras .notepad-btn { line-height: 20px; }
 .notepad-btn { flex: none; margin-left: auto; }
 .title-input {
   flex: 1; min-width: 0; padding: 2px 0; border: 0; border-bottom: 1px dashed var(--muted); border-radius: 0;
