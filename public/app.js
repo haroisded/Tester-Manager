@@ -276,14 +276,14 @@ function renderConcernMeta() {
 
 // The tester's own card: the problem card, plus the status the admin gave it.
 function myConcern(c) {
-  return `<article class="item card problem" id="c-${c.id}" data-concern="${c.id}" data-state="${c.state}" data-fold="c${c.id}">
+  return `<article class="item card problem" id="c-${c.id}" data-concern="${c.id}" data-state="${c.state}">
     <div class="item-head card-head">
       <input id="ct${c.id}" class="title-input" value="${esc(c.title)}" maxlength="200" placeholder="Concern title" aria-label="Concern title">
       ${concernTag(c)}
     </div>
     <div class="card-body">
-      <textarea class="fit" rows="1" placeholder="Comments (optional)" aria-label="Comments">${esc(c.comments)}</textarea>
-      <div class="text-tools">${MORE}${NOTEPAD}</div>
+      <textarea class="concern-text" rows="3" placeholder="Comments (optional)" aria-label="Comments">${esc(c.comments)}</textarea>
+      ${NOTEPAD}
       ${thumbs(concernImages(c.id), true)}
       ${c.state === 'saved' ? '' : '<p class="hint">Only you can see drafts. Save to send it to the admin.</p>'}
       <div class="actions">
@@ -298,14 +298,13 @@ function myConcern(c) {
 
 // The admin's view of a tester's card: their words read-only, the status in the admin's hands.
 function theirConcern(c) {
-  return `<article class="item card" id="c-${c.id}" data-concern="${c.id}" data-fold="c${c.id}">
+  return `<article class="item card" id="c-${c.id}" data-concern="${c.id}">
     <div class="item-head card-head">
       <h3 class="item-title">${esc(c.title)}</h3>
       ${concernTag(c)}
     </div>
     <div class="card-body">
-      ${c.comments ? `<p class="pre feedback fit">${esc(c.comments)}</p>` : ''}
-      ${c.comments ? `<div class="text-tools">${MORE}${NOTEPAD}</div>` : MORE}
+      ${c.comments ? `<p class="pre feedback folded">${esc(c.comments)}</p>${NOTEPAD}` : ''}
       ${thumbs(concernImages(c.id), false)}
       <div class="status-row">
         <div class="seg" role="radiogroup" aria-label="Status of ${esc(c.title)}">

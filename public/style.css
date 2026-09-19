@@ -342,8 +342,9 @@ main.wide { max-width: 1120px; }
 textarea.folded { max-height: calc(3lh + 10px); padding-bottom: 0; mask-image: none; }
 .feedback.folded { max-height: calc(3lh + 4px); }                    /* + its padding */
 .more { display: block; margin-top: 6px; }
-.text-tools { display: flex; align-items: baseline; gap: 14px; }
-.notepad-btn { margin: 6px 0 0 auto; }
+/* concern comments keep a fixed 3-line box; the notepad is where they are written and read in full */
+.concern-text { resize: none; }
+.notepad-btn { display: block; margin: 6px 0 0 auto; }
 .title-input {
   flex: 1; min-width: 0; padding: 2px 0; border: 0; border-bottom: 1px dashed var(--muted); border-radius: 0;
   background: none; font: 700 13px/1.4 var(--mono); color: inherit;
