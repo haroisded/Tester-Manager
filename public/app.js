@@ -145,7 +145,7 @@ function renderGallery() {
   grid.innerHTML = `<div class="gallery">${list.slice((page - 1) * PER_PAGE, page * PER_PAGE).map(s => `
     <article class="feed-item card">
       <div class="card-head">
-        <h2><a href="#/suite/${s.id}">${esc(s.title)}</a></h2>
+        <h2><a href="#/suite/${s.id}${me.is_admin ? '/overview' : ''}">${esc(s.title)}</a></h2>
       </div>
       <div class="card-body">
         <div class="counts">
@@ -394,7 +394,7 @@ async function showSuite() {
           </div>
         </section>
         <nav class="tabs">
-          ${tab('', 'tests', 'Tests')}${tab('/problems', 'problems', 'Problems')}${tab('/overview', 'overview', 'Overview')}
+          ${me.is_admin ? tab('/overview', 'overview', 'Overview') : ''}${tab('', 'tests', 'Tests')}${tab('/problems', 'problems', 'Problems')}${me.is_admin ? '' : tab('/overview', 'overview', 'Overview')}
         </nav>
         <div class="toolbar" id="toolbar"></div>
         <div class="chips" id="chips"></div>
