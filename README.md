@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧪 Testing Manager
+# 📋✅ Tester Manager
 
 **Publish acceptance tests. Watch testers answer them live.**
 
@@ -12,6 +12,7 @@ updates in real time.
 ![Express](https://img.shields.io/badge/express-5-222)
 ![SQLite](https://img.shields.io/badge/sqlite-built--in-0f80cc)
 ![Dependencies](https://img.shields.io/badge/dependencies-1-orange)
+![Vibe coded](https://img.shields.io/badge/vibe%20coded-Claude%20Opus%205-d97757)
 
 </div>
 
@@ -55,8 +56,8 @@ That's all. The database is SQLite, which is built into Node, so there's nothing
 ### 2. Install
 
 ```bash
-git clone <your-repo-url> testing-manager
-cd testing-manager
+git clone https://github.com/haroisded/Tester-Manager.git
+cd Tester-Manager
 npm install
 ```
 
@@ -178,4 +179,6 @@ admin-credentials.txt   Admin login
 
 <div align="center">
 <sub>A private side project. It's meant for small teams on trusted links, not the open internet.</sub>
+<br>
+<sub>✨ Entirely vibe coded with <b>Claude Opus 5</b></sub>
 </div>
