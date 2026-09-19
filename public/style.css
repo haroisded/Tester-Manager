@@ -342,6 +342,8 @@ main.wide { max-width: 1120px; }
 textarea.folded { max-height: calc(3lh + 10px); padding-bottom: 0; mask-image: none; }
 .feedback.folded { max-height: calc(3lh + 4px); }                    /* + its padding */
 .more { display: block; margin-top: 6px; }
+.text-tools { display: flex; align-items: baseline; gap: 14px; }
+.notepad-btn { margin: 6px 0 0 auto; }
 .title-input {
   flex: 1; min-width: 0; padding: 2px 0; border: 0; border-bottom: 1px dashed var(--muted); border-radius: 0;
   background: none; font: 700 13px/1.4 var(--mono); color: inherit;
@@ -442,6 +444,10 @@ textarea.folded { max-height: calc(3lh + 10px); padding-bottom: 0; mask-image: n
 .profile-head { display: flex; align-items: center; gap: 14px; }
 .profile-head h2 { overflow: hidden; text-overflow: ellipsis; }
 .modal-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 24px; padding-top: 16px; border-top: 1px dashed var(--rule); }
+/* notepad: the tester's box is roomy but capped; the admin's text is only as tall as it is, scrolling past 60vh */
+#notepad-text { width: 100%; height: min(55vh, 480px); margin-top: 14px; }
+#notepad-read { margin-top: 14px; max-height: 60vh; overflow: auto; }
+#notepad-text[hidden], #notepad-read[hidden] { display: none; }
 .md-input { min-height: 14em; max-height: 50vh; font-size: 12px; }
 .file-btn { margin-top: 14px; }
 #lightbox { max-width: 95vw; max-height: 95vh; padding: 0; border: 0; background: none; cursor: zoom-out; }

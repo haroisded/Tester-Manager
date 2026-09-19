@@ -283,7 +283,7 @@ function myConcern(c) {
     </div>
     <div class="card-body">
       <textarea class="fit" rows="1" placeholder="Comments (optional)" aria-label="Comments">${esc(c.comments)}</textarea>
-      ${MORE}
+      <div class="text-tools">${MORE}${NOTEPAD}</div>
       ${thumbs(concernImages(c.id), true)}
       ${c.state === 'saved' ? '' : '<p class="hint">Only you can see drafts. Save to send it to the admin.</p>'}
       <div class="actions">
@@ -305,7 +305,7 @@ function theirConcern(c) {
     </div>
     <div class="card-body">
       ${c.comments ? `<p class="pre feedback fit">${esc(c.comments)}</p>` : ''}
-      ${MORE}
+      ${c.comments ? `<div class="text-tools">${MORE}${NOTEPAD}</div>` : MORE}
       ${thumbs(concernImages(c.id), false)}
       <div class="status-row">
         <div class="seg" role="radiogroup" aria-label="Status of ${esc(c.title)}">
@@ -597,6 +597,7 @@ function problemRow(p, mine) {
 // too. Past 3 lines they fold to a 3-line preview (.folded in style.css) behind "See more". Each one sits in a
 // [data-fold] box whose key remembers that it was opened.
 const MORE = '<button type="button" class="more link" hidden>See more</button>';
+const NOTEPAD = '<button type="button" class="link notepad-btn" data-notepad>Open in notepad</button>'; // concern cards
 const unfolded = new Set(); // data-fold keys of text that was opened
 // A textarea that is exactly as tall as its text. Used on its own by the editor, whose boxes grow
 // but never fold.
@@ -888,6 +889,7 @@ main.addEventListener('click', safe(async e => {
     filter = el.dataset.cfilter;
     return renderConcerns();
   }
+  if ((el = t.closest('[data-notepad]'))) return openNotepad(el.closest('[data-concern]'));
   if ((el = t.closest('[data-hide-concern]'))) {
     const c = C.concerns.find(x => x.id === Number(el.dataset.hideConcern));
     await api(`/api/concerns/${c.id}/hidden`, send('PATCH', { hidden: !c.hidden }));
@@ -1101,6 +1103,27 @@ function ask(title, body, yes = 'Delete') {
   return new Promise(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'yes'), { once: true }));
 }
 $('#confirm-yes').addEventListener('click', () => $('#confirm').close('yes'));
+
+// ---------- notepad: a roomy view of one concern's Comments ----------
+// Testers type here and it mirrors into the card, which autosaves as usual; the admin reads it, line breaks kept.
+let notepadRow = null;
+function openNotepad(row) {
+  const c = C.concerns.find(x => x.id === Number(row.dataset.concern));
+  notepadRow = me.is_admin ? null : row;
+  $('#notepad-title').textContent = (me.is_admin ? c.title : $('.title-input', row).value.trim()) || 'Untitled concern';
+  $('#notepad-text').hidden = me.is_admin;
+  $('#notepad-read').hidden = !me.is_admin;
+  if (me.is_admin) $('#notepad-read').textContent = c.comments;
+  else $('#notepad-text').value = $('textarea', row).value;
+  $('#notepad-hint').textContent = me.is_admin ? `By ${C.testers.find(u => u.id === c.user_id)?.username ?? 'a tester'}` : 'Saves as you type';
+  $('#notepad').showModal();
+}
+$('#notepad-text').addEventListener('input', e => {
+  const box = $('textarea', notepadRow);
+  box.value = e.target.value;
+  box.dispatchEvent(new Event('input', { bubbles: true })); // the card's own handler grows it and queues the save
+});
+$('#notepad').addEventListener('close', () => notepadRow?.isConnected && flushRow(notepadRow));
 
 // ---------- test editor (admin): #/new and #/edit/:id ----------
 // Same four headings as SECTIONS in md.js, which checks that they round-trip.
