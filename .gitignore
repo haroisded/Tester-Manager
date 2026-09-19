@@ -1,0 +1,8 @@
+node_modules/
+
+# Runtime data: the server recreates all of these on first start
+data.db
+data.db-*
+*.bak
+uploads/
+admin-credentials.txt
