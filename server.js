@@ -1,4 +1,4 @@
-// Tester Manager server: Express + built-in node:sqlite, live updates over Server-Sent Events.
+// UAT - Manager server: Express + built-in node:sqlite, live updates over Server-Sent Events.
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -82,6 +82,17 @@ db.exec(`
     text TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+  -- Downloads page: one row per version of an app. New versions are new rows, so older ones stay as history.
+  CREATE TABLE IF NOT EXISTS releases (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    description TEXT NOT NULL,
+    url TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'laggy', 'maintenance')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
   CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users ON DELETE CASCADE,
@@ -109,6 +120,19 @@ addColumn('notifications', 'comment_id', 'INTEGER REFERENCES comments ON DELETE 
 addColumn('suites', 'intro_md', 'TEXT');
 addColumn('tests', 'body_md', 'TEXT');
 addColumn('concerns', 'hidden', 'INTEGER NOT NULL DEFAULT 0'); // the admin's own filing; testers never see it
+addColumn('suites', 'published', 'INTEGER NOT NULL DEFAULT 1'); // 0 = unpublished: only the admin sees it
+addColumn('notifications', 'release_id', 'INTEGER REFERENCES releases ON DELETE CASCADE'); // deleting a release takes its alerts
+// The admin comment used to be a thread; it is now one text per document with Save / Draft.
+// Existing threads are merged, oldest first, into their newest row.
+if (!all('PRAGMA table_info(comments)').some(c => c.name === 'state')) {
+  addColumn('comments', 'state', "TEXT NOT NULL DEFAULT 'saved' CHECK (state IN ('draft', 'saved'))");
+  for (const { suite_id } of all('SELECT suite_id FROM comments GROUP BY suite_id HAVING COUNT(*) > 1')) {
+    const rows = all('SELECT id, text FROM comments WHERE suite_id = ? ORDER BY id', suite_id);
+    const newest = rows.at(-1).id;
+    run('UPDATE comments SET text = ? WHERE id = ?', rows.map(r => r.text).join('\n\n'), newest);
+    run('DELETE FROM comments WHERE suite_id = ? AND id != ?', suite_id, newest);
+  }
+}
 // Documents published before titles dropped "— acceptance tests": fix them and their alerts.
 for (const s of all("SELECT id, title FROM suites WHERE title LIKE '%acceptance test%'")) {
   const title = cleanTitle(s.title);
@@ -160,7 +184,7 @@ function readCreds() {
 }
 function writeCreds({ username, password }) {
   fs.writeFileSync(CREDS, [
-    'Tester Manager admin login (plain text, for the programmer only).',
+    'UAT - Manager admin login (plain text, for the programmer only).',
     'Edit these two lines and restart the server to change it.',
     '',
     `username: ${username}`,
@@ -332,10 +356,13 @@ app.patch('/api/me', (req, res) => {
 });
 
 // ---------- test documents ----------
+// Testers only ever see published documents.
+const seesSuite = req => (req.user.is_admin ? '1' : 's.published = 1');
+
 app.get('/api/suites', (req, res) => {
   res.json({
-    suites: all(`SELECT s.id, s.title, s.created_at, (SELECT COUNT(*) FROM tests t WHERE t.suite_id = s.id) AS total
-                 FROM suites s ORDER BY s.id DESC`),
+    suites: all(`SELECT s.id, s.title, s.created_at, s.published, (SELECT COUNT(*) FROM tests t WHERE t.suite_id = s.id) AS total
+                 FROM suites s WHERE ${seesSuite(req)} ORDER BY s.id DESC`),
     problems: all(`SELECT suite_id, user_id, COUNT(*) AS n FROM problems WHERE state = 'saved'
                    GROUP BY suite_id, user_id`),
   });
@@ -373,33 +400,48 @@ app.post('/api/suites/parse', adminOnly, (req, res) => {
   });
 });
 
+// Publish / Unpublish, run inside the save's transaction. Publishing sends the "new tests" alert once
+// (if asked to); unpublishing takes back every alert for the document, so publishing again alerts again.
+// Returns whether testers' bells changed.
+function setPublished(id, published, notify, title, testCount) {
+  const { notified } = get('SELECT notified FROM suites WHERE id = ?', id);
+  run('UPDATE suites SET published = ? WHERE id = ?', published ? 1 : 0, id);
+  if (!published) {
+    run('UPDATE suites SET notified = 0 WHERE id = ?', id);
+    return run('DELETE FROM notifications WHERE suite_id = ?', id).changes > 0;
+  }
+  if (notified || !notify) return false;
+  run('UPDATE suites SET notified = 1 WHERE id = ?', id);
+  run('INSERT INTO notifications (user_id, suite_id, text) SELECT id, ?, ? FROM users WHERE is_admin = 0',
+    id, noticeText(title, testCount));
+  return true;
+}
+
 app.post('/api/suites', adminOnly, (req, res) => {
   const { parsed } = fromFields(req.body);
-  const notify = Boolean(req.body.notify);
+  let alerted = false;
   const suiteId = tx(() => {
-    const id = run('INSERT INTO suites (title, intro_html, intro_md, notified) VALUES (?, ?, ?, ?)',
-      parsed.title, renderMd(parsed.intro), parsed.intro, notify ? 1 : 0).lastInsertRowid;
+    const id = run('INSERT INTO suites (title, intro_html, intro_md, notified) VALUES (?, ?, ?, 0)',
+      parsed.title, renderMd(parsed.intro), parsed.intro).lastInsertRowid;
     const insertTest = db.prepare('INSERT INTO tests (suite_id, num, title, body_html, body_md) VALUES (?, ?, ?, ?, ?)');
     for (const t of parsed.tests) insertTest.run(id, t.num, t.title, renderMd(t.body), t.body);
-    if (notify) {
-      run(`INSERT INTO notifications (user_id, suite_id, text) SELECT id, ?, ? FROM users WHERE is_admin = 0`,
-        id, noticeText(parsed.title, parsed.tests.length));
-    }
+    alerted = setPublished(id, Boolean(req.body.published), Boolean(req.body.notify), parsed.title, parsed.tests.length);
     return id;
   });
   broadcast(req, 'suites', suiteId);
-  if (notify) broadcast(req, 'notify');
+  if (alerted) broadcast(req, 'notify');
   res.json({ id: suiteId });
 });
 
 // The editor's fields for an existing document.
 app.get('/api/suites/:id/source', adminOnly, (req, res) => {
   const id = Number(req.params.id);
-  const suite = get('SELECT id, title, intro_md, intro_html FROM suites WHERE id = ?', id);
+  const suite = get('SELECT id, title, intro_md, intro_html, published FROM suites WHERE id = ?', id);
   if (!suite) return res.status(404).json({ error: 'These tests were deleted.' });
   res.json({
     id: suite.id,
     title: suite.title,
+    published: suite.published,
     intro: suite.intro_md ?? '',
     legacy_intro_html: suite.intro_md == null && suite.intro_html ? suite.intro_html : null,
     tests: all('SELECT id, num, title, body_md, body_html FROM tests WHERE suite_id = ? ORDER BY num, id', id)
@@ -420,6 +462,7 @@ app.put('/api/suites/:id', adminOnly, (req, res) => {
   const keep = ids.filter(v => v !== null);
   const notKept = keep.length ? ` AND id NOT IN (${keep.map(() => '?').join(',')})` : '';
   const files = all(`SELECT file FROM images WHERE test_id IN (SELECT id FROM tests WHERE suite_id = ?${notKept})`, id, ...keep);
+  let alerted = false;
   tx(() => {
     if (keepIntro) run('UPDATE suites SET title = ? WHERE id = ?', parsed.title, id);
     else run('UPDATE suites SET title = ?, intro_html = ?, intro_md = ? WHERE id = ?', parsed.title, renderMd(parsed.intro), parsed.intro, id);
@@ -432,10 +475,12 @@ app.put('/api/suites/:id', adminOnly, (req, res) => {
       else if (noBody(doc.tests[i])) rename.run(t.num, t.title, ids[i]);
       else update.run(t.num, t.title, renderMd(t.body), t.body, ids[i]);
     });
+    alerted = setPublished(id, Boolean(req.body.published), Boolean(req.body.notify), parsed.title, parsed.tests.length);
   });
   removeFiles(files);
   broadcast(req, 'suites', id);
   broadcast(req, 'suite', id);
+  if (alerted) broadcast(req, 'notify');
   res.json({ ok: true });
 });
 
@@ -453,8 +498,8 @@ app.delete('/api/suites/:id', adminOnly, (req, res) => {
 // One test document with every tester's sheet. Problems: everyone's saved ones plus your own drafts.
 app.get('/api/suites/:id', (req, res) => {
   const id = Number(req.params.id);
-  const suite = get('SELECT id, title, intro_html, created_at FROM suites WHERE id = ?', id);
-  if (!suite) return res.status(404).json({ error: 'These tests were deleted.' });
+  const suite = get(`SELECT id, title, intro_html, created_at, published FROM suites s WHERE id = ? AND ${seesSuite(req)}`, id);
+  if (!suite) return res.status(404).json({ error: 'These tests were deleted or unpublished.' });
   res.json({
     suite,
     tests: all('SELECT id, num, title, body_html FROM tests WHERE suite_id = ? ORDER BY num, id', id),
@@ -468,32 +513,32 @@ app.get('/api/suites/:id', (req, res) => {
                  LEFT JOIN tests t ON t.id = i.test_id LEFT JOIN problems p ON p.id = i.problem_id
                  WHERE t.suite_id = ? OR (p.suite_id = ? AND (p.state = 'saved' OR p.user_id = ?))
                  ORDER BY i.id`, id, id, req.user.id),
-    comments: all('SELECT id, text, created_at FROM comments WHERE suite_id = ? ORDER BY id DESC', id),
+    // The admin also gets a draft; testers only a saved comment.
+    comment: get(`SELECT text, state, created_at FROM comments WHERE suite_id = ?
+                  ${req.user.is_admin ? '' : "AND state = 'saved'"}`, id) ?? null,
   });
 });
 
-// ---------- admin comments (one thread per test document, shown to every tester) ----------
-app.post('/api/suites/:id/comments', adminOnly, (req, res) => {
-  const suite = get('SELECT id, title FROM suites WHERE id = ?', Number(req.params.id));
+// ---------- admin comment (one text per test document; Save shows it to testers, Draft keeps it the admin's) ----------
+// Saving new text sends a fresh bell alert; Draft and emptying it take the old alerts back.
+app.put('/api/suites/:id/comment', adminOnly, (req, res) => {
+  const suite = get('SELECT id, title, published FROM suites WHERE id = ?', Number(req.params.id));
   if (!suite) return res.status(404).json({ error: 'These tests were deleted.' });
   const text = str(req.body?.text).trim();
-  if (!text) return res.status(400).json({ error: 'Write a comment first' });
-  const line = text.replace(/\s+/g, ' ');
+  const state = req.body?.state === 'saved' ? 'saved' : 'draft';
+  const old = get('SELECT id, text, state FROM comments WHERE suite_id = ?', suite.id);
+  const alert = state === 'saved' && suite.published && (old?.state !== 'saved' || old.text !== text) && text;
   tx(() => {
-    const id = run('INSERT INTO comments (suite_id, text) VALUES (?, ?)', suite.id, text).lastInsertRowid;
+    if (old && (!text || state === 'draft' || alert)) run('DELETE FROM notifications WHERE comment_id = ?', old.id);
+    if (!text) return old && run('DELETE FROM comments WHERE id = ?', old.id);
+    const id = old ? old.id : run('INSERT INTO comments (suite_id, text, state) VALUES (?, ?, ?)', suite.id, text, state).lastInsertRowid;
+    if (old) run('UPDATE comments SET text = ?, state = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?', text, state, id);
+    if (!alert) return;
+    const line = text.replace(/\s+/g, ' ');
     run(`INSERT INTO notifications (user_id, suite_id, comment_id, text) SELECT id, ?, ?, ? FROM users WHERE is_admin = 0`,
       suite.id, id, `Admin comment on ${suite.title}: ${line.length > 80 ? `${line.slice(0, 80)}…` : line}`);
   });
   broadcast(req, 'suite', suite.id);
-  broadcast(req, 'notify');
-  res.json({ ok: true });
-});
-
-app.delete('/api/comments/:id', adminOnly, (req, res) => {
-  const comment = get('SELECT id, suite_id FROM comments WHERE id = ?', Number(req.params.id));
-  if (!comment) return res.status(404).json({ error: 'Comment not found' });
-  run('DELETE FROM comments WHERE id = ?', comment.id);
-  broadcast(req, 'suite', comment.suite_id);
   broadcast(req, 'notify');
   res.json({ ok: true });
 });
@@ -609,6 +654,56 @@ app.delete('/api/concerns/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- downloads (releases) ----------
+// Everyone reads; the admin writes. Setting or changing a link alerts the testers who exist right now
+// (it is not replayed to testers who sign up later).
+const RELEASE_STATUSES = ['active', 'laggy', 'maintenance'];
+
+app.get('/api/releases', (req, res) => {
+  res.json(all('SELECT * FROM releases ORDER BY id DESC').map(r => ({ ...r, description_html: renderMd(r.description) })));
+});
+
+// Only http(s) links: anything else (javascript:, data:) could run in a tester's browser.
+function releaseFields(body) {
+  const f = { name: str(body?.name).trim(), version: str(body?.version).trim(), description: str(body?.description).trim(), url: str(body?.url).trim() };
+  if (!f.name || !f.version || !f.description) throw bad('Name, version and description are required');
+  if (f.url && !/^https?:$/.test(URL.parse(f.url)?.protocol)) throw bad('The link must start with http:// or https://');
+  f.status = RELEASE_STATUSES.includes(body?.status) ? body.status : 'active';
+  return f;
+}
+
+function saveRelease(req, res, id) {
+  const f = releaseFields(req.body);
+  const old = id ? get('SELECT url FROM releases WHERE id = ?', id) : null;
+  if (id && !old) return res.status(404).json({ error: 'Download not found' });
+  const alert = f.url && f.url !== old?.url;
+  tx(() => {
+    if (id) {
+      run(`UPDATE releases SET name = ?, version = ?, description = ?, url = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`, f.name, f.version, f.description, f.url, f.status, id);
+    } else {
+      id = run('INSERT INTO releases (name, version, description, url, status) VALUES (?, ?, ?, ?, ?)',
+        f.name, f.version, f.description, f.url, f.status).lastInsertRowid;
+    }
+    if (!alert) return;
+    run('DELETE FROM notifications WHERE release_id = ?', id); // one alert per release: the newest link
+    run('INSERT INTO notifications (user_id, release_id, text) SELECT id, ?, ? FROM users WHERE is_admin = 0',
+      id, `New download: ${f.name} ${f.version}`);
+  });
+  broadcast(req, 'releases');
+  if (alert) broadcast(req, 'notify');
+  res.json({ id });
+}
+app.post('/api/releases', adminOnly, (req, res) => saveRelease(req, res, null));
+app.put('/api/releases/:id', adminOnly, (req, res) => saveRelease(req, res, Number(req.params.id)));
+
+app.delete('/api/releases/:id', adminOnly, (req, res) => {
+  run('DELETE FROM releases WHERE id = ?', Number(req.params.id));
+  broadcast(req, 'releases');
+  broadcast(req, 'notify'); // its alerts went with it
+  res.json({ ok: true });
+});
+
 // ---------- images ----------
 const IMAGE_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
 
@@ -646,7 +741,7 @@ app.delete('/api/images/:id', testerOnly, (req, res) => {
 
 // ---------- notifications (testers) ----------
 app.get('/api/notifications', (req, res) => {
-  res.json(all('SELECT id, suite_id, text, created_at FROM notifications WHERE user_id = ? ORDER BY id DESC', req.user.id));
+  res.json(all('SELECT id, suite_id, release_id, text, created_at FROM notifications WHERE user_id = ? ORDER BY id DESC', req.user.id));
 });
 app.delete('/api/notifications/:id', (req, res) => {
   run('DELETE FROM notifications WHERE id = ? AND user_id = ?', Number(req.params.id), req.user.id);
@@ -665,6 +760,6 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Tester Manager running at http://localhost:${PORT}`);
+  console.log(`UAT - Manager running at http://localhost:${PORT}`);
   console.log(`Admin login: ${CREDS}`);
 });

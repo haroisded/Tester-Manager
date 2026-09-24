@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tester Manager</title>
+<title>UAT - Manager</title>
 <script src="theme.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,10 +13,11 @@
 <body>
 <header class="top">
   <div class="top-inner">
-    <a class="brand" href="#/">Tester<span>.manager</span></a>
+    <a class="brand" href="#/">UAT<span>.manager</span></a>
     <nav class="nav" id="nav">
       <a href="#/" data-nav="home">Tests</a>
       <a href="#/concerns" data-nav="concerns">Concerns</a>
+      <a href="#/downloads" data-nav="downloads">Downloads</a>
       <a href="#/users" data-nav="users" id="nav-users" hidden>Users</a>
     </nav>
     <div class="top-actions">
@@ -70,7 +71,7 @@
     <p class="hint" id="password-hint" hidden>Sign out and back in to see it here.</p>
     <div class="modal-foot">
       <button type="button" class="btn" id="signout">Sign out</button>
-      <button type="button" class="link danger" id="delete-account" hidden>Delete account</button>
+      <button type="button" class="btn small warn" id="delete-account" hidden>Delete account</button>
     </div>
   </div>
   <div id="profile-delete" class="modal-body" hidden>
@@ -103,6 +104,83 @@
     <textarea id="notepad-text" placeholder="Write your concern…" aria-label="Comments"></textarea>
     <div id="notepad-read" class="pre"></div>
   </div>
+</dialog>
+
+<!-- the admin's one comment per test document; Save shows it to testers, Draft keeps it the admin's -->
+<dialog id="comment-pad" class="modal wide">
+  <div class="modal-head">
+    <span class="eyebrow">Comment for all testers</span>
+    <div class="head-actions">
+      <button type="button" class="btn small primary" id="comment-save">Save</button>
+      <button type="button" class="btn small" id="comment-draft">Draft</button>
+    </div>
+    <button type="button" class="x-btn" id="comment-x" aria-label="Close">×</button>
+  </div>
+  <div class="modal-body">
+    <p class="hint" id="comment-state"></p>
+    <textarea id="comment-text" placeholder="Write a comment for all testers…" aria-label="Comment for all testers"></textarea>
+  </div>
+</dialog>
+
+<dialog id="paste-md" class="modal wide">
+  <div class="modal-head"><span class="eyebrow">Paste a .md file</span><button type="button" class="x-btn" data-close aria-label="Close">×</button></div>
+  <div class="modal-body">
+    <p class="muted" id="md-help"></p>
+    <label class="btn small file-btn">Upload .md file
+      <input type="file" id="md-file" class="sr-only" accept=".md,.markdown,.txt,text/markdown,text/plain">
+    </label>
+    <label class="label" for="md-text">Test document</label>
+    <textarea id="md-text" class="md-input" placeholder="# Resources&#10;&#10;## Test 1 - Title: …"></textarea>
+    <div class="actions">
+      <button type="button" class="btn small primary" id="md-append" disabled>Add to the end</button>
+      <button type="button" class="btn small" id="md-load" disabled>Load into the form</button>
+      <span class="hint" id="md-count">0 tests found</span>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="pdf-pick" class="modal">
+  <div class="modal-head"><span class="eyebrow">Download PDFs</span><button type="button" class="x-btn" data-close aria-label="Close">×</button></div>
+  <div class="modal-body">
+    <h2>Whose reports?</h2>
+    <p class="muted">Every checked tester's report goes into one PDF, each starting on a new page.</p>
+    <div class="actions">
+      <button type="button" class="btn small" id="pdf-all">All</button>
+      <button type="button" class="btn small" id="pdf-none">None</button>
+    </div>
+    <div class="pick-list" id="pdf-list"></div>
+    <div class="actions">
+      <button type="button" class="btn primary" id="pdf-go">Download PDF</button>
+      <button type="button" class="btn" data-close>Cancel</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="release" class="modal wide">
+  <div class="modal-head"><span class="eyebrow" id="release-head">New release</span><button type="button" class="x-btn" data-close aria-label="Close">×</button></div>
+  <form class="modal-body" id="release-form">
+    <label class="label" for="rel-name">App name</label>
+    <input id="rel-name" maxlength="100" placeholder="Field App" required>
+    <label class="label" for="rel-version">Version</label>
+    <input id="rel-version" maxlength="50" placeholder="1.4.0" required>
+    <label class="label" for="rel-desc">Description</label>
+    <textarea id="rel-desc" rows="5" placeholder="What's new, and what to test first" required></textarea>
+    <label class="label" for="rel-url">Download link <span class="muted">(optional)</span></label>
+    <input id="rel-url" type="url" placeholder="https://…">
+    <p class="hint">Setting or changing the link alerts every current tester.</p>
+    <p class="error" id="release-error" role="alert"></p>
+    <div class="actions">
+      <button class="btn primary">Save</button>
+      <button type="button" class="btn" data-close>Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- the list of tests: a drawer opened by the mini FAB on the Tests tab -->
+<dialog id="drawer" class="drawer" aria-label="List of tests">
+  <div class="modal-head"><span class="eyebrow">Tests</span><button type="button" class="x-btn" data-close aria-label="Close">×</button></div>
+  <div class="chips" id="chips"></div>
+  <ul class="drawer-list" id="drawer-list"></ul>
 </dialog>
 
 <dialog id="lightbox" aria-label="Image preview"><img alt=""></dialog>

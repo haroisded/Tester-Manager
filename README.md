@@ -1,6 +1,6 @@
 <div align="center">
 
-# 📋 Tester Manager
+# 📋 UAT - Manager
 
 **Publish acceptance tests. Watch testers answer them live.**
 
@@ -33,12 +33,13 @@ updates in real time.
 
 | For the **admin** | For **testers** |
 | --- | --- |
-| Paste or upload a Markdown test document to publish it | Sign up themselves and see every published document |
-| Edit a document later; testers' answers are kept | Mark each test **PASS**, **FAIL** or **N/A**, with feedback and screenshots |
-| See each tester's answer sheet and an overview of results | Report **problems** found while testing a document |
-| Post comments on a document, and testers get a bell alert | Raise general **concerns** and follow their status |
-| Set concern status (**On-hold · On-process · Applied**), hide concerns, filter by tester | Manage their own profile, or delete their account |
-| Manage users, see who's online, and download results as PDF | Get alerts right away, with no page refresh |
+| Write a test document, or paste / upload one in Markdown, then **Publish** or keep it **Unpublished** | Sign up themselves and see every published document |
+| Edit a document later, or add more tests from a .md file; testers' answers are kept | Work through tests one at a time, with a list of every test and its status one tap away |
+| See each tester's answer sheet and an overview of results, 5 testers per page | Mark each test **PASS**, **FAIL** or **N/A**, with feedback and screenshots |
+| Write one comment per document, as a draft or published with a bell alert | Report **problems** found while testing a document |
+| Put app downloads on the **Downloads** page, with versions kept and a status (**Active · Laggy · Under maintenance**) | Download the app they're testing, and get an alert when a new link is up |
+| Set concern status (**On-hold · On-process · Applied**), hide concerns, filter by tester | Raise general **concerns** and follow their status |
+| Manage users, see who's online, and download chosen testers' results as one PDF | Manage their own profile, or delete their account; get alerts with no page refresh |
 
 It works on phones, tablets and desktops, and has light and dark themes (it
 follows your device by default).
@@ -70,7 +71,7 @@ npm start
 You should see:
 
 ```
-Tester Manager running at http://localhost:3000
+UAT - Manager running at http://localhost:3000
 ```
 
 Open **http://localhost:3000** in your browser.

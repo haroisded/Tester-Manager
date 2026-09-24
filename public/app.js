@@ -1,4 +1,4 @@
-// Tester Manager client: hash router, answer sheets, live updates over Server-Sent Events.
+// UAT - Manager client: hash router, answer sheets, live updates over Server-Sent Events.
 const TAB = Math.random().toString(36).slice(2); // tags our own writes so we can ignore their echo
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -16,11 +16,12 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const main = $('#main');
 
 let me;             // signed-in user (includes their own password)
-let route = {};     // { name: 'home' | 'users' | 'concerns' | 'editor' | 'suite', id?, tab? }
+let route = {};     // { name: 'home' | 'users' | 'concerns' | 'downloads' | 'editor' | 'suite', id?, tab?, test? }
 let S = null;       // GET /api/suites/:id payload for the open suite
 let viewing = null; // suite: user id whose sheet is shown; concerns (admin): whose cards, null = every tester
 let filter = 'all'; // tests: 'all' | 'na' | 'PASS' | 'FAIL'; concerns (admin): 'all' | a concern status
-let jumpTo = null;  // test id to scroll to after the next render
+let current = null; // id of the test shown in the Tests tab's window (null = the first one)
+let opage = 1;      // 1-based page of testers on the Overview
 
 // Width, content and scroll change in the same frame. Setting the width before the page's fetch
 // resolved used to stretch the old page for the length of the request, which read as a jump.
@@ -68,15 +69,18 @@ const safe = fn => async (...args) => {
 function parseHash() {
   const h = location.hash;
   let m;
-  if ((m = h.match(/^#\/suite\/(\d+)(?:\/(problems|overview))?$/))) return { name: 'suite', id: Number(m[1]), tab: m[2] ?? 'tests' };
+  if ((m = h.match(/^#\/suite\/(\d+)(?:\/(problems|overview)|\/t\/(\d+))?$/))) {
+    return { name: 'suite', id: Number(m[1]), tab: m[2] ?? 'tests', test: m[3] ? Number(m[3]) : null };
+  }
   if (h === '#/concerns') return { name: 'concerns' };
+  if (h === '#/downloads') return { name: 'downloads' };
   if (!me.is_admin) return { name: 'home' };
   if (h === '#/users') return { name: 'users' };
   if (h === '#/new') return { name: 'editor', id: null };
   if ((m = h.match(/^#\/edit\/(\d+)$/))) return { name: 'editor', id: Number(m[1]) };
   return { name: 'home' };
 }
-const NAV_OF = { users: 'users', concerns: 'concerns' }; // everything else lights up "Tests"
+const NAV_OF = { users: 'users', concerns: 'concerns', downloads: 'downloads' }; // everything else lights up "Tests"
 
 const router = safe(async () => {
   await flushSaves();
@@ -86,13 +90,17 @@ const router = safe(async () => {
     filter = 'all';
     search = '';
     page = 1;
+    opage = 1;
+    current = null;
     routeChanged = true;
   }
+  if (next.test) current = next.test; // switching tabs keeps your place in the Tests tab
   route = next;
   for (const a of document.querySelectorAll('[data-nav]')) a.classList.toggle('on', a.dataset.nav === (NAV_OF[route.name] ?? 'home'));
   if (route.name === 'home') await showHome();
   else if (route.name === 'users') await showUsers();
   else if (route.name === 'concerns') await showConcerns();
+  else if (route.name === 'downloads') await showDownloads();
   else if (route.name === 'editor') await showEditor();
   else await showSuite();
 });
@@ -146,6 +154,7 @@ function renderGallery() {
     <article class="feed-item card">
       <div class="card-head">
         <h2><a href="#/suite/${s.id}${me.is_admin ? '/overview' : ''}">${esc(s.title)}</a></h2>
+        ${s.published ? '' : '<span class="tag draft">Unpublished</span>'}
       </div>
       <div class="card-body">
         <div class="counts">
@@ -154,22 +163,23 @@ function renderGallery() {
         </div>
         <p class="meta">Published ${when(s.created_at)}</p>
         ${me.is_admin ? `<div class="card-actions raise">
-          <a class="link" href="#/edit/${s.id}">Edit</a>
-          <button class="link danger" data-del-suite="${s.id}">Delete</button>
+          <a class="btn small" href="#/edit/${s.id}">Edit</a>
+          <button class="btn small warn" data-del-suite="${s.id}">Delete</button>
         </div>` : ''}
       </div>
-    </article>`).join('')}</div>${pager(pages)}`;
+    </article>`).join('')}</div>${pager(pages, page, 'page')}`;
 }
 
-function pager(pages) {
+// `attr` names the data attribute the click handler reads: data-page (gallery) or data-opage (Overview).
+function pager(pages, at, attr) {
   if (pages < 2) return '';
-  const step = (to, label, on) => `<button class="btn small" data-page="${to}" ${on ? '' : 'disabled'}>${label}</button>`;
-  return `<nav class="pager" aria-label="Gallery pages">
-    ${step(page - 1, '‹ Prev', page > 1)}
+  const step = (to, label, on) => `<button class="btn small" data-${attr}="${to}" ${on ? '' : 'disabled'}>${label}</button>`;
+  return `<nav class="pager" aria-label="Pages">
+    ${step(at - 1, '‹ Prev', at > 1)}
     <span class="page-nums">${Array.from({ length: pages }, (_, i) => i + 1).map(n =>
-      `<button class="page-num ${n === page ? 'on' : ''}" data-page="${n}"
-        aria-current="${n === page ? 'page' : 'false'}">${n}</button>`).join('')}</span>
-    ${step(page + 1, 'Next ›', page < pages)}
+      `<button class="page-num ${n === at ? 'on' : ''}" data-${attr}="${n}"
+        aria-current="${n === at ? 'page' : 'false'}">${n}</button>`).join('')}</span>
+    ${step(at + 1, 'Next ›', at < pages)}
   </nav>`;
 }
 
@@ -200,7 +210,7 @@ function renderUsers() {
         ${u.password == null ? '<span class="muted">Password shows after their next sign-in</span>' : `
           <code>${shownPasswords.has(u.id) ? esc(u.password) : '••••••••'}</code>
           <button class="btn small" data-show-pass="${u.id}">${shownPasswords.has(u.id) ? 'Hide' : 'Show'}</button>`}
-        <button class="link danger" data-del-user="${u.id}">Delete</button>
+        <button class="btn small warn" data-del-user="${u.id}">Delete</button>
       </div>`}
     </li>`).join('')}</ul>`);
 }
@@ -209,10 +219,10 @@ function renderUsers() {
 let C = null; // GET /api/concerns payload
 const CONCERN_STATUS = [['on-hold', 'On-hold', 'hold'], ['on-process', 'On-process', 'process'], ['applied', 'Applied', 'applied']];
 const concernStatus = value => CONCERN_STATUS.find(([v]) => v === value);
-// Head tag: the status once it reaches the admin, "Draft" while only its writer can see it.
+// Head tag: the status once it reaches the admin, "Unpublished" while only its writer can see it.
 const concernTag = c => (c.state === 'saved'
   ? `<span class="pill ${concernStatus(c.status)[2]}" data-tag>${concernStatus(c.status)[1]}</span>`
-  : '<span class="tag draft" data-tag>Draft</span>');
+  : '<span class="tag draft" data-tag>Unpublished</span>');
 const concernImages = id => C.images.filter(i => i.concern_id === id);
 const CONCERN_CHIPS = [['all', 'All'], ...CONCERN_STATUS, ['hidden', 'Hidden']];
 // The admin's cards under a chip: hidden ones leave All and their status for Hidden. Follows the tester picker.
@@ -284,12 +294,11 @@ function myConcern(c) {
     <div class="card-body">
       <textarea class="concern-text" rows="2" placeholder="Comments (optional)" aria-label="Comments">${esc(c.comments)}</textarea>
       <div class="concern-extras">${thumbs(concernImages(c.id), true)}${NOTEPAD}</div>
-      ${c.state === 'saved' ? '' : '<p class="hint">Only you can see drafts. Save to send it to the admin.</p>'}
       <div class="actions">
-        <button type="button" class="btn small primary" data-act="saved">Save</button>
-        <button type="button" class="btn small" data-act="draft">Draft</button>
+        <button type="button" class="btn small primary" data-act="saved">Publish</button>
+        <button type="button" class="btn small" data-act="draft">Unpublish</button>
         <span class="save-state" aria-live="polite"></span>
-        <button type="button" class="link danger" data-act="delete">Delete</button>
+        <button type="button" class="btn small warn" data-act="delete">Delete</button>
       </div>
     </div>
   </article>`;
@@ -313,8 +322,8 @@ function theirConcern(c) {
       </div>
       <div class="concern-extras">${thumbs(concernImages(c.id), false)}</div>
       <div class="card-actions">
-        <button type="button" class="link" data-hide-concern="${c.id}">${c.hidden ? 'Unhide' : 'Hide'}</button>
-        <button type="button" class="link danger" data-del-concern="${c.id}">Delete</button>
+        <button type="button" class="btn small" data-hide-concern="${c.id}">${c.hidden ? 'Unhide' : 'Hide'}</button>
+        <button type="button" class="btn small warn" data-del-concern="${c.id}">Delete</button>
         ${c.comments ? NOTEPAD : ''}
       </div>
     </div>
@@ -343,6 +352,110 @@ async function setStatus(id, status) {
 // Autosave and image changes land on whichever page the row lives on.
 const reload = redraw => (route.name === 'concerns' ? reloadConcerns(redraw) : reloadSuite(redraw));
 
+// ---------- downloads: the admin's app links, one card per app, older versions kept below ----------
+let R = [];              // GET /api/releases payload, newest first
+let editingRelease = null; // release being edited in #release, null = a new one
+const RELEASE_STATUS = [['active', 'Active', 'applied'], ['laggy', 'Laggy', 'laggy'], ['maintenance', 'Under maintenance', 'fail']];
+const releaseStatus = value => RELEASE_STATUS.find(([v]) => v === value);
+
+async function showDownloads() {
+  R = await api('/api/releases');
+  if (route.name !== 'downloads') return;
+  const open = new Set([...main.querySelectorAll('details.versions[open]')].map(d => d.dataset.app));
+  const apps = Map.groupBy(R, r => r.name); // insertion order: the app with the newest release first
+  paint(`
+    <p class="eyebrow">Apps to test</p>
+    <div class="page-head">
+      <h1>Downloads</h1>
+      ${me.is_admin ? '<button class="btn primary" id="new-release">+ New release</button>' : ''}
+    </div>
+    <p class="meta">// ${plural(apps.size, 'app')} · newest version on top, older ones below it</p>
+    ${apps.size ? [...apps].map(([name, [latest, ...older]]) => `
+      <section class="card release">
+        <div class="card-head">
+          <h2>${esc(name)}</h2>
+          ${me.is_admin ? `<button class="btn small" data-new-version="${esc(name)}">+ New version</button>` : ''}
+        </div>
+        <div class="card-body">
+          ${releaseHtml(latest, true)}
+          ${older.length ? `<details class="versions" data-app="${esc(name)}" ${open.has(name) ? 'open' : ''}>
+            <summary class="btn small">Previous versions (${older.length})</summary>
+            ${older.map(r => `<div class="release-old">${releaseHtml(r, false)}</div>`).join('')}
+          </details>` : ''}
+        </div>
+      </section>`).join('')
+      : `<div class="empty">${me.is_admin ? 'No downloads yet. Use <b>New release</b> to add the first app.'
+        : 'No downloads yet. The bell lets you know when the admin adds one.'}</div>`}`);
+}
+
+// Testers get the download button, shaped by the status; the admin gets the link and status controls.
+function releaseHtml(r, latest) {
+  const [, label, cls] = releaseStatus(r.status);
+  const meta = `<p class="release-meta">
+    <b>${esc(r.version)}</b>${latest ? ' <span class="tag boxed">Latest</span>' : ''}
+    <span>· ${when(r.created_at)}${r.updated_at !== r.created_at ? ` · updated ${when(r.updated_at)}` : ''}</span>
+    <span class="pill ${cls}">${label}</span>
+  </p>
+  <div class="md">${r.description_html}</div>`;
+  if (me.is_admin) {
+    return `${meta}
+      <div class="status-row">
+        <div class="seg" role="radiogroup" aria-label="Status of ${esc(r.name)} ${esc(r.version)}">
+          ${RELEASE_STATUS.map(([v, l, c]) => `<label class="${c}">
+            <input type="radio" name="rs${r.id}" value="${v}" data-rstatus="${r.id}" ${r.status === v ? 'checked' : ''}><span>${l}</span>
+          </label>`).join('')}
+        </div>
+      </div>
+      <p class="meta release-link">${r.url ? `Link: <a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.url)}</a>` : 'No link yet. Testers see "Link coming soon".'}</p>
+      <div class="card-actions">
+        <button class="btn small primary" data-release-link="${r.id}">${r.url ? 'Change link' : 'Set link'}</button>
+        <button class="btn small" data-edit-release="${r.id}">Edit</button>
+        <button class="btn small warn" data-del-release="${r.id}">Delete</button>
+      </div>`;
+  }
+  const size = latest ? 'btn' : 'btn small';
+  if (!r.url) return `${meta}<div class="release-slot"><button class="${size}" disabled>Link coming soon</button></div>`;
+  if (r.status === 'maintenance') {
+    return `${meta}<div class="release-slot"><button class="${size}" disabled>Under maintenance</button>
+      <p class="hint">This download is being worked on. Check back later.</p></div>`;
+  }
+  return `${meta}<div class="release-slot">
+    <a class="${size} ${latest ? 'primary' : ''}" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">Download</a>
+    ${r.status === 'laggy' ? '<p class="note caution">Downloads may be slow or unstable right now.</p>' : ''}
+  </div>`;
+}
+
+// One dialog for New release, New version, Edit and Set / Change link.
+function openRelease(r, focus = 'rel-name') {
+  editingRelease = r.id ?? null;
+  $('#release-head').textContent = editingRelease ? `Edit ${r.name} ${r.version}` : 'New release';
+  $('#rel-name').value = r.name ?? '';
+  $('#rel-version').value = r.version ?? '';
+  $('#rel-desc').value = r.description ?? '';
+  $('#rel-url').value = r.url ?? '';
+  $('#release-error').textContent = '';
+  $('#release').showModal();
+  $(`#${focus}`).focus();
+}
+const releaseBody = r => ({ name: r.name, version: r.version, description: r.description, url: r.url, status: r.status });
+$('#release-form').addEventListener('submit', safe(async e => {
+  e.preventDefault();
+  const body = {
+    name: $('#rel-name').value, version: $('#rel-version').value, description: $('#rel-desc').value, url: $('#rel-url').value,
+    status: R.find(r => r.id === editingRelease)?.status ?? 'active',
+  };
+  try {
+    if (editingRelease) await api(`/api/releases/${editingRelease}`, send('PUT', body));
+    else await api('/api/releases', send('POST', body));
+  } catch (err) {
+    $('#release-error').textContent = err.message;
+    return;
+  }
+  $('#release').close();
+  toast('Download saved');
+  await showDownloads();
+}));
+
 // ---------- suite page ----------
 const answerOf = (testId, userId) => S.answers.find(a => a.test_id === testId && a.user_id === userId) ?? {};
 const statusOf = (testId, userId) => answerOf(testId, userId).status ?? 'na'; // no status yet = N/A
@@ -363,7 +476,7 @@ async function showSuite() {
     S = await api(`/api/suites/${id}`);
   } catch (err) {
     S = null;
-    paint(`<div class="empty">${esc(err.message)}<br><br><a href="#/">Back to all tests</a></div>`);
+    paint(`<div class="empty">${esc(err.message)}<br><br><a class="btn small" href="#/">← All tests</a></div>`);
     return;
   }
   if (route.id !== id) return;
@@ -372,7 +485,10 @@ async function showSuite() {
   paint(`
     <div class="back-row">
       <a class="btn small" href="#/">← All tests</a>
-      ${me.is_admin ? `<a class="btn small" href="#/edit/${id}">Edit tests</a>` : ''}
+      ${me.is_admin ? `<span class="back-actions">
+        <button class="btn small" id="open-comment">Comment</button>
+        <a class="btn small" href="#/edit/${id}">Edit tests</a>
+      </span>` : ''}
     </div>
     <header class="suite-head">
       <p class="eyebrow">Test document</p>
@@ -383,21 +499,13 @@ async function showSuite() {
     <div class="suite-grid">
       <div class="suite-top">
         <section class="card comments" id="comments" hidden>
-          <div class="card-head"><span class="eyebrow">Admin comments</span><span class="tag" id="comments-count"></span></div>
-          <div class="card-body">
-            <div id="comments-list"></div>
-            ${me.is_admin ? `<form class="comment-form" id="comment-form" data-fold="compose">
-              <textarea id="comment-text" class="fit" rows="2" placeholder="Write a comment for all testers…" aria-label="Comment for all testers"></textarea>
-              <button class="btn small primary">Post</button>
-              ${MORE}
-            </form>` : ''}
-          </div>
+          <div class="card-head"><span class="eyebrow">Admin comment</span></div>
+          <div class="card-body" id="comments-list"></div>
         </section>
         <nav class="tabs">
           ${me.is_admin ? tab('/overview', 'overview', 'Overview') : ''}${tab('', 'tests', 'Tests')}${tab('/problems', 'problems', 'Problems')}${me.is_admin ? '' : tab('/overview', 'overview', 'Overview')}
         </nav>
         <div class="toolbar" id="toolbar"></div>
-        <div class="chips" id="chips"></div>
       </div>
       <section id="sheet"></section>
     </div>`, 'wide');
@@ -413,31 +521,27 @@ async function reloadSuite(withSheet) {
   renderComments();
   renderToolbar();
   if (withSheet) renderSheet();
+  else renderDrawer(); // no inputs in it, so its pills can follow every save
 }
 
-// Admin comments: newest in full, older ones folded. Only the list redraws, so the admin's unsent text stays.
+// The admin's comment, as testers see it. The admin writes it in #comment-pad instead.
 function renderComments() {
   const box = $('#comments');
   if (!box) return;
-  const [latest, ...older] = S.comments;
-  box.hidden = !latest && !me.is_admin;
-  const wasOpen = $('#comments .earlier')?.open;
-  const one = c => `<div class="comment" data-fold="c${c.id}">
-    <p class="pre fit">${esc(c.text)}</p>
+  box.hidden = me.is_admin || !S.comment;
+  if (box.hidden) return;
+  $('#comments-list').innerHTML = `<div class="comment" data-fold="comment">
+    <p class="pre fit">${esc(S.comment.text)}</p>
     ${MORE}
-    <p class="meta">admin · ${ago(c.created_at)}${me.is_admin ? ` · <button class="link danger" data-del-comment="${c.id}">Delete</button>` : ''}</p>
+    <p class="meta">admin · ${ago(S.comment.created_at)}</p>
   </div>`;
-  $('#comments-count').textContent = plural(S.comments.length, 'comment');
-  $('#comments-list').innerHTML = !latest ? '<p class="meta">No comments yet. Testers see them here and get a bell alert.</p>'
-    : one(latest) + (older.length ? `<details class="earlier" ${wasOpen ? 'open' : ''}>
-      <summary>${plural(older.length, 'earlier comment')}</summary>${older.map(one).join('')}</details>` : '');
   $('#comments-list').querySelectorAll('.fit').forEach(fit);
 }
 
 const STATUS_LABEL = { PASS: 'PASS', FAIL: 'FAIL', na: 'N/A' };
 const pill = status => `<span class="pill ${(status ?? 'na').toLowerCase()}">${STATUS_LABEL[status ?? 'na']}</span>`;
 
-// The "Viewing" picker, the PDF button and the filter chips: everything above the sheet.
+// The "Viewing" picker above the sheet, plus the filter chips in the drawer.
 // The Overview tab has its own page, so the toolbar steps aside there.
 function renderToolbar() {
   const bar = $('#toolbar');
@@ -447,19 +551,24 @@ function renderToolbar() {
     bar.innerHTML = `
       <label class="viewing">Viewing <select id="viewing" ${S.testers.length ? '' : 'disabled'}>${S.testers.length
         ? S.testers.map(u => `<option value="${u.id}" ${u.id === viewing ? 'selected' : ''}>${esc(u.username)}${u.id === me.id ? ' (you)' : ''}</option>`).join('')
-        : '<option>No testers yet</option>'}</select></label>
-      ${me.is_admin ? `<button class="btn small" id="pdf" ${viewing == null ? 'disabled' : ''}>Download PDF</button>` : ''}`;
+        : '<option>No testers yet</option>'}</select></label>`;
   }
   renderChips();
 }
 
 // The Overview tab: a summary card per tester (what reads on a phone) over the full matrix (what
-// reads on a desktop). Both are drawn from the same counts.
+// reads on a desktop). Both are drawn from the same counts. The admin pages through 5 testers at a time.
+const OVERVIEW_PER_PAGE = 5;
 function overviewHtml() {
   if (!S.testers.length) return '<p class="note">The status overview fills in once testers register.</p>';
-  const row = (label, cell) => `<tr><th scope="row">${label}</th>${S.testers.map(u => `<td>${cell(u)}</td>`).join('')}</tr>`;
+  const per = me.is_admin ? OVERVIEW_PER_PAGE : S.testers.length;
+  const pages = Math.ceil(S.testers.length / per);
+  opage = Math.min(Math.max(1, opage), pages);
+  const testers = S.testers.slice((opage - 1) * per, opage * per);
+  const row = (label, cell) => `<tr><th scope="row">${label}</th>${testers.map(u => `<td>${cell(u)}</td>`).join('')}</tr>`;
   return `
-    <div class="overview-cards">${S.testers.map(u => `
+    ${me.is_admin ? '<div class="overview-bar"><button class="btn small" id="pdfs">Download PDFs</button></div>' : ''}
+    <div class="overview-cards">${testers.map(u => `
       <article class="card tester-card">
         <div class="card-head">
           <span class="who">
@@ -481,7 +590,7 @@ function overviewHtml() {
     <div class="card matrix-card">
       <div class="card-head"><span>Every test</span><span class="tag">${plural(S.testers.length, 'tester')}</span></div>
       <div class="matrix-wrap"><table class="matrix">
-        <thead><tr><th scope="col">Test</th>${S.testers.map(u => `<th scope="col">
+        <thead><tr><th scope="col">Test</th>${testers.map(u => `<th scope="col">
           <button data-view="${u.id}" class="${u.id === viewing ? 'on' : ''}" title="Show ${esc(u.username)}'s sheet">${esc(u.username)}</button>
         </th>`).join('')}</tr></thead>
         <tbody>${S.tests.map(t => row(`<button data-jump="${t.id}" title="${esc(t.title)}">${t.num}</button>`, u => pill(answerOf(t.id, u.id).status))).join('')}</tbody>
@@ -492,7 +601,8 @@ function overviewHtml() {
           ${row('Problems', u => problemsOf(u.id).filter(p => p.n).length)}
         </tfoot>
       </table></div>
-    </div>`;
+    </div>
+    ${pager(pages, opage, 'opage')}`;
 }
 
 const FILTERS = [['all', 'All'], ['na', 'N/A'], ['PASS', 'Pass'], ['FAIL', 'Fail']];
@@ -520,10 +630,25 @@ function renderSheet() {
     : 'No testers yet. Answers show up here once testers register.'}</p>`;
 
   if (route.tab === 'tests') {
-    const tests = S.tests.filter(t => filter === 'all' || statusOf(t.id, viewing) === filter);
-    const label = FILTERS.find(([f]) => f === filter)[1];
-    sheet.innerHTML = note + (tests.length ? tests.map(t => testRow(t, mine)).join('')
-      : `<div class="empty">No tests marked ${label} on this sheet.</div>`);
+    // One test at a time. Back / Next walk the tests the filter chip lets through.
+    const tests = shownTests();
+    const i = Math.max(0, tests.findIndex(t => t.id === current));
+    const t = tests[i];
+    if (t && t.id !== current) {
+      current = t.id;
+      history.replaceState(null, '', `#/suite/${route.id}/t/${current}`);
+    }
+    const step = (to, label) => (to ? `<button class="btn small" data-go="${to.id}">${label}</button>` : '<span></span>');
+    sheet.innerHTML = `<div class="window">${note}${t ? `${testRow(t, mine)}
+      <div class="stepper">
+        ${step(tests[i - 1], '‹ Back')}
+        <span class="meta">${i + 1} / ${tests.length}</span>
+        ${step(tests[i + 1], 'Next ›')}
+      </div>` : `<div class="empty">No tests marked ${FILTERS.find(([f]) => f === filter)[1]} on this sheet.</div>`}</div>
+      <button class="fab" id="fab" aria-label="List of tests" title="List of tests">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+             aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg>
+      </button>`;
   } else {
     const list = problemsOf(viewing);
     sheet.innerHTML = note
@@ -533,10 +658,33 @@ function renderSheet() {
   }
   for (const id of open) document.getElementById(id)?.querySelector('details')?.setAttribute('open', '');
   sheet.querySelectorAll('.fit').forEach(fit);
-  if (jumpTo) {
-    document.getElementById(`t-${jumpTo}`)?.scrollIntoView({ behavior: 'smooth' });
-    jumpTo = null;
-  }
+  renderDrawer();
+}
+
+const shownTests = () => S.tests.filter(t => filter === 'all' || statusOf(t.id, viewing) === filter);
+const pad = n => String(n).padStart(2, '0');
+
+// The drawer's list: every test the filter lets through, with the shown sheet's status on the right.
+function renderDrawer() {
+  const list = $('#drawer-list');
+  if (!S || route.tab !== 'tests') return;
+  const tests = shownTests();
+  list.innerHTML = tests.length ? tests.map(t => `<li>
+    <button class="drawer-row ${t.id === current ? 'on' : ''}" data-go="${t.id}" ${t.id === current ? 'aria-current="true"' : ''}>
+      <span class="num">${pad(t.num)}</span><span class="t">${esc(t.title)}</span>${pill(statusOf(t.id, viewing))}
+    </button></li>`).join('')
+    : `<li class="empty">No tests marked ${FILTERS.find(([f]) => f === filter)[1]}.</li>`;
+}
+
+// Picked in the drawer or with Back / Next. Replaces the URL rather than adding history, so the
+// browser's Back still leaves the page instead of walking through every test.
+async function goTest(id) {
+  await flushSaves();
+  current = id;
+  history.replaceState(null, '', `#/suite/${route.id}/t/${id}`);
+  renderSheet();
+  const card = $('#sheet .item');
+  if (card && card.getBoundingClientRect().top < 0) card.scrollIntoView();
 }
 
 function testRow(t, mine) {
@@ -544,10 +692,10 @@ function testRow(t, mine) {
   return `<article class="item card" id="t-${t.id}" data-test="${t.id}" data-fold="${viewing}:t${t.id}">
     <div class="item-head card-head">
       <h3 class="item-title">${esc(t.title)}</h3>
-      <span class="tag">Test ${String(t.num).padStart(2, '0')}</span>
+      <span class="tag">Test ${pad(t.num)}</span>
     </div>
     <div class="card-body">
-      <details class="steps"><summary><span class="show">Show steps</span><span class="hide">Hide steps</span></summary>
+      <details class="steps"><summary class="btn small"><span class="show">Show steps</span><span class="hide">Hide steps</span></summary>
         <div class="md">${t.body_html}</div></details>
       ${mine ? `
         <div class="status-row">
@@ -586,7 +734,7 @@ function problemRow(p, mine) {
           <button type="button" class="btn small primary" data-act="saved">Save</button>
           <button type="button" class="btn small" data-act="draft">Draft</button>
           <span class="save-state" aria-live="polite"></span>
-          <button type="button" class="link danger" data-act="delete">Delete</button>
+          <button type="button" class="btn small warn" data-act="delete">Delete</button>
         </div>` : ''}
     </div>
   </article>`;
@@ -595,8 +743,8 @@ function problemRow(p, mine) {
 // Feedback, problem comments and admin comments (posted or being written) grow with their text, blank lines
 // too. Past 3 lines they fold to a 3-line preview (.folded in style.css) behind "See more". Each one sits in a
 // [data-fold] box whose key remembers that it was opened.
-const MORE = '<button type="button" class="more link" hidden>See more</button>';
-const NOTEPAD = '<button type="button" class="link notepad-btn" data-notepad>Open in notepad</button>'; // concern cards
+const MORE = '<button type="button" class="more btn small" hidden>See more</button>';
+const NOTEPAD = '<button type="button" class="btn small notepad-btn" data-notepad>Open in notepad</button>'; // concern cards
 const unfolded = new Set(); // data-fold keys of text that was opened
 // A textarea that is exactly as tall as its text. Used on its own by the editor, whose boxes grow
 // but never fold.
@@ -621,11 +769,11 @@ function unfold(row, open) {
   fit($('.fit', row));
 }
 
-// Images as small squares. Your own rows get one add control: a quiet link when empty, a tile after the images.
+// Images as small squares. Your own rows get one add control: a button when empty, a tile after the images.
 function thumbs(list, mine) {
   if (!list.length && !mine) return '';
   const input = '<input type="file" accept="image/*" multiple class="sr-only">';
-  if (!list.length) return `<div class="thumbs"><label class="add-link add">${input}+ Add image</label></div>`;
+  if (!list.length) return `<div class="thumbs"><label class="btn small add">${input}+ Add image</label></div>`;
   return `<div class="thumbs">
     ${list.map(i => `<figure class="thumb">
       <img src="/uploads/${i.file}" alt="Attached image" loading="lazy">
@@ -721,7 +869,6 @@ main.addEventListener('input', e => {
     page = 1;
     return renderGallery();
   }
-  if (e.target.id === 'md-text') return updateCount();
   if (e.target.matches('textarea.auto')) return grow(e.target);
   if (e.target.matches('.fit')) unfold(e.target.closest('[data-fold]'), true); // never fold what you're typing
   if (e.target.matches(EDITABLE)) queueSave(e.target.closest('.item'));
@@ -734,10 +881,6 @@ addEventListener('resize', () => { // text rewraps
   main.querySelectorAll('.fit').forEach(fit);
   main.querySelectorAll('textarea.auto').forEach(grow);
 });
-// Older comments are measured while their <details> is shut (zero height), so measure again on opening.
-main.addEventListener('toggle', e => {
-  if (e.target.matches('.earlier')) e.target.querySelectorAll('.fit').forEach(fit);
-}, true);
 main.addEventListener('focusout', e => {
   if (e.target.matches(EDITABLE)) flushRow(e.target.closest('.item'));
 });
@@ -748,27 +891,14 @@ main.addEventListener('change', safe(async e => {
     viewing = t.value ? Number(t.value) : null;
     return renderConcerns();
   }
-  if (t.id === 'md-file') return loadMdFile(t);
   if ('status' in t.dataset) return setStatus(t.closest('.item').dataset.concern, t.value);
+  if ('rstatus' in t.dataset) {
+    const r = R.find(x => x.id === Number(t.dataset.rstatus));
+    await api(`/api/releases/${r.id}`, send('PUT', { ...releaseBody(r), status: t.value }));
+    return showDownloads();
+  }
   if (t.type === 'radio') return saveRow(t.closest('.item'));
   if (t.type === 'file') return upload(t.closest('.item'), t);
-}));
-
-main.addEventListener('submit', safe(async e => {
-  if (e.target.id !== 'comment-form') return;
-  e.preventDefault();
-  const text = $('#comment-text');
-  const post = $('#comment-form button');
-  if (!text.value.trim()) return text.focus();
-  post.disabled = true;
-  try {
-    await api(`/api/suites/${route.id}/comments`, send('POST', { text: text.value }));
-    text.value = '';
-    fit(text);
-    await reloadSuite(false);
-  } finally {
-    post.disabled = false;
-  }
 }));
 
 async function showSheetOf(userId) {
@@ -790,8 +920,31 @@ main.addEventListener('click', safe(async e => {
     renderGallery();
     return scrollTo({ top: 0, behavior: 'smooth' });
   }
-  if (t.closest('#save-doc')) return saveDoc();
-  if (t.closest('#md-load')) return loadMd();
+  if ((el = t.closest('[data-opage]'))) {
+    opage = Number(el.dataset.opage);
+    return renderSheet();
+  }
+  if ((el = t.closest('[data-go]'))) return goTest(Number(el.dataset.go));
+  if (t.closest('#fab')) {
+    renderChips();
+    renderDrawer();
+    $('#drawer').showModal();
+    return $('#drawer .on')?.scrollIntoView({ block: 'center' });
+  }
+  if (t.closest('#pdfs')) return openPdfPick();
+  if (t.closest('#open-comment')) return openCommentPad();
+  if (t.closest('#new-release')) return openRelease({});
+  if ((el = t.closest('[data-new-version]'))) return openRelease({ name: el.dataset.newVersion }, 'rel-version');
+  if ((el = t.closest('[data-edit-release]'))) return openRelease(R.find(r => r.id === Number(el.dataset.editRelease)));
+  if ((el = t.closest('[data-release-link]'))) return openRelease(R.find(r => r.id === Number(el.dataset.releaseLink)), 'rel-url');
+  if ((el = t.closest('[data-del-release]'))) {
+    const r = R.find(x => x.id === Number(el.dataset.delRelease));
+    if (!(await ask(`Delete ${r.name} ${r.version}?`, 'Testers can no longer download it, and its bell alerts go with it. This cannot be undone.'))) return;
+    await api(`/api/releases/${r.id}`, { method: 'DELETE' });
+    return showDownloads();
+  }
+  if ((el = t.closest('[data-publish]'))) return saveDoc(el.dataset.publish === '1');
+  if (t.closest('#open-paste')) return openPaste();
   if (t.closest('#add-block')) {
     readEditor();
     const added = blankTest();
@@ -843,32 +996,12 @@ main.addEventListener('click', safe(async e => {
     await api(`/api/suites/${el.dataset.delSuite}`, { method: 'DELETE' });
     return showHome();
   }
-  if ((el = t.closest('[data-del-comment]'))) {
-    if (!(await ask('Delete this comment?', 'Testers will no longer see it, and its bell alerts go with it.'))) return;
-    await api(`/api/comments/${el.dataset.delComment}`, { method: 'DELETE' });
-    return reloadSuite(false);
-  }
   if ((el = t.closest('[data-view]'))) return showSheetOf(Number(el.dataset.view));
-  if ((el = t.closest('[data-filter]'))) {
-    await flushSaves();
-    filter = el.dataset.filter;
-    renderChips();
-    return renderSheet();
-  }
   if ((el = t.closest('[data-jump]'))) {
     filter = 'all'; // the test might be hidden by a filter
-    if (route.tab !== 'tests') {
-      jumpTo = el.dataset.jump;
-      location.hash = `#/suite/${route.id}`;
-      return;
-    }
-    if (!document.getElementById(`t-${el.dataset.jump}`)) {
-      renderChips();
-      renderSheet();
-    }
-    return document.getElementById(`t-${el.dataset.jump}`)?.scrollIntoView({ behavior: 'smooth' });
+    location.hash = `#/suite/${route.id}/t/${el.dataset.jump}`;
+    return;
   }
-  if (t.closest('#pdf')) return printSheet();
   if (t.matches('.thumb img')) {
     $('#lightbox img').src = t.src;
     return $('#lightbox').showModal();
@@ -922,35 +1055,60 @@ main.addEventListener('click', safe(async e => {
 }));
 
 // ---------- PDF (browser print → Save as PDF) ----------
-async function printSheet() {
-  await flushSaves();
-  await reloadSuite(false);
-  const who = S.testers.find(u => u.id === viewing);
-  if (!who) return;
-  const problems = problemsOf(viewing).filter(p => p.n);
+// The admin picks testers on the Overview; their reports go into one print, each on a new page.
+function openPdfPick() {
+  $('#pdf-list').innerHTML = S.testers.map(u => `<label class="check"><input type="checkbox" value="${u.id}" checked> ${esc(u.username)}</label>`).join('');
+  $('#pdf-go').disabled = false;
+  $('#pdf-pick').showModal();
+}
+const pickedIds = () => [...$('#pdf-list').querySelectorAll('input:checked')].map(i => Number(i.value));
+$('#pdf-pick').addEventListener('change', () => ($('#pdf-go').disabled = !pickedIds().length));
+$('#pdf-pick').addEventListener('click', e => {
+  const all = e.target.closest('#pdf-all');
+  if (!all && !e.target.closest('#pdf-none')) return;
+  $('#pdf-list').querySelectorAll('input').forEach(i => (i.checked = Boolean(all)));
+  $('#pdf-go').disabled = !all;
+});
+$('#pdf-go').addEventListener('click', safe(async () => {
+  const ids = pickedIds();
+  $('#pdf-pick').close();
+  await printReports(ids);
+}));
+
+function reportHtml(who) {
+  const id = who.id;
+  const problems = problemsOf(id).filter(p => p.n);
   const images = list => (list.length ? `<div class="p-imgs">${list.map(i => `<img src="/uploads/${i.file}" alt="">`).join('')}</div>` : '');
-  const out = $('#print');
-  out.innerHTML = `
+  return `
     <h1>${esc(S.suite.title)}</h1>
     <p class="p-meta">Tester: ${esc(who.username)} · ${new Date().toLocaleDateString(undefined, { dateStyle: 'medium' })} ·
-      ${statusCount(viewing, 'PASS')} passed, ${statusCount(viewing, 'FAIL')} failed, ${statusCount(viewing, 'na')} N/A</p>
+      ${statusCount(id, 'PASS')} passed, ${statusCount(id, 'FAIL')} failed, ${statusCount(id, 'na')} N/A</p>
     ${S.tests.map(t => {
-      const a = answerOf(t.id, viewing);
+      const a = answerOf(t.id, id);
       return `<section>
         <h2>Test ${t.num} - Title: ${esc(t.title)}</h2>
         <p><b>Status:</b> ${STATUS_LABEL[a.status ?? 'na']}</p>
         <p class="pre"><b>Feedback:</b> ${esc(a.feedback)}</p>
-        ${images(imagesOf('test_id', t.id, viewing))}
+        ${images(imagesOf('test_id', t.id, id))}
       </section>`;
     }).join('')}
     ${problems.length ? `<h2 class="p-section">Problems</h2>${problems.map(p => `<section>
       <h2>Problem ${p.n} - ${esc(p.title)}</h2>
       <p class="pre"><b>Comments:</b> ${esc(p.comments)}</p>
-      ${images(imagesOf('problem_id', p.id, viewing))}
+      ${images(imagesOf('problem_id', p.id, id))}
     </section>`).join('')}` : ''}`;
+}
+
+async function printReports(ids) {
+  await reloadSuite(false);
+  const who = S.testers.filter(u => ids.includes(u.id));
+  if (!who.length) return;
+  const out = $('#print');
+  out.innerHTML = who.map((u, i) => `<div class="${i ? 'p-break' : ''}">${reportHtml(u)}</div>`).join('');
   await Promise.all([...out.querySelectorAll('img')].map(img => img.complete || new Promise(r => (img.onload = img.onerror = r))));
   const title = document.title;
-  document.title = `${S.suite.title} - ${who.username}`; // becomes the PDF file name
+  // becomes the PDF file name
+  document.title = who.length === 1 ? `${S.suite.title} - ${who[0].username}` : `${S.suite.title} - ${who.length} testers`;
   addEventListener('afterprint', () => (document.title = title), { once: true });
   print();
 }
@@ -962,6 +1120,8 @@ const onEvent = safe(async ev => {
   if (route.name === 'users') return ev.type === 'suite' || ev.type === 'concerns' || showUsers(); // presence, sign-ups, renames, deletions
   if (ev.type === 'presence' || ev.tab === TAB) return; // presence only matters on Users; own changes are on screen
   if (route.name === 'editor') return; // the form is yours until you save it
+  if (route.name === 'downloads') return ev.type === 'releases' || ev.type === 'suites' ? showDownloads() : undefined;
+  if (ev.type === 'releases') return;
   // Concerns listen to their own event, plus sign-ups, renames and deletions of testers.
   if (route.name === 'concerns') return ev.type === 'concerns' || ev.type === 'suites' ? reloadConcerns(false) : undefined;
   if (ev.type === 'concerns') return;
@@ -999,9 +1159,9 @@ async function loadNotifications() {
   $('#bell').setAttribute('aria-label', `Notifications (${list.length})`);
   $('#bell-panel').innerHTML = `
     <div class="panel-head"><b>Notifications</b>${list.length ? `<span class="muted">· ${list.length}</span>
-      <button class="link" data-clear-notes>Clear all</button>` : ''}</div>
+      <button class="btn small" data-clear-notes>Clear all</button>` : ''}</div>
     <div class="panel-list">${list.length ? list.map(n => `<div class="note-item">
-      <a href="${n.suite_id ? `#/suite/${n.suite_id}` : '#/'}" data-open-note="${n.id}">${esc(n.text)}<small>${ago(n.created_at)}</small></a>
+      <a href="${n.suite_id ? `#/suite/${n.suite_id}` : n.release_id ? '#/downloads' : '#/'}" data-open-note="${n.id}">${esc(n.text)}<small>${ago(n.created_at)}</small></a>
       <button class="x" data-del-note="${n.id}" aria-label="Delete notification">×</button>
     </div>`).join('') : '<p class="empty">You\'re all caught up.</p>'}</div>`;
   return list;
@@ -1027,6 +1187,57 @@ $('#bell-panel').addEventListener('click', safe(async e => {
 document.addEventListener('click', e => {
   if (!e.target.closest('.bell-wrap')) $('#bell-panel').hidden = true;
   e.target.closest('[data-close]')?.closest('dialog').close();
+});
+
+// ---------- the Tests tab's drawer ----------
+$('#drawer').addEventListener('click', safe(async e => {
+  const drawer = $('#drawer');
+  if (e.target === drawer) return drawer.close(); // the backdrop
+  let el;
+  if ((el = e.target.closest('[data-go]'))) {
+    drawer.close();
+    return goTest(Number(el.dataset.go));
+  }
+  if ((el = e.target.closest('[data-filter]'))) {
+    await flushSaves();
+    filter = el.dataset.filter;
+    renderChips();
+    renderSheet();
+  }
+}));
+
+// ---------- admin comment: a notepad with Save / Draft and no autosave ----------
+let commentSaved = ''; // the text as last saved, to spot unsaved edits on close
+function openCommentPad() {
+  commentSaved = S.comment?.text ?? '';
+  $('#comment-text').value = commentSaved;
+  $('#comment-state').textContent = !S.comment ? 'No comment yet. Save shows it to every tester and rings their bell.'
+    : S.comment.state === 'saved' ? `Published ${ago(S.comment.created_at)}. Testers see it above the tabs.`
+      : `Draft, saved ${ago(S.comment.created_at)}. Only you can see it.`;
+  $('#comment-pad').showModal();
+  $('#comment-text').focus();
+}
+async function closeCommentPad() {
+  if ($('#comment-text').value.trim() !== commentSaved.trim()
+    && !(await ask('Discard changes?', 'Your edits to the comment are not saved.', 'Discard'))) return;
+  $('#comment-pad').close();
+}
+const saveComment = state => safe(async () => {
+  const text = $('#comment-text').value;
+  await api(`/api/suites/${route.id}/comment`, send('PUT', { text, state }));
+  commentSaved = text;
+  $('#comment-pad').close();
+  toast(!text.trim() ? 'Comment removed' : state === 'saved'
+    ? (S.suite.published ? 'Comment published. Testers were alerted.' : 'Comment saved. Testers see it once the tests are published.')
+    : 'Draft saved. Only you can see it.');
+  await reloadSuite(false);
+});
+$('#comment-save').addEventListener('click', saveComment('saved'));
+$('#comment-draft').addEventListener('click', saveComment('draft'));
+$('#comment-x').addEventListener('click', closeCommentPad);
+$('#comment-pad').addEventListener('cancel', e => { // Esc
+  e.preventDefault();
+  closeCommentPad();
 });
 
 // ---------- profile ----------
@@ -1145,18 +1356,22 @@ async function showEditor() {
     try {
       src = await api(`/api/suites/${id}/source`);
     } catch (err) {
-      return paint(`<div class="empty">${esc(err.message)}<br><br><a href="#/">Back to all tests</a></div>`);
+      return paint(`<div class="empty">${esc(err.message)}<br><br><a class="btn small" href="#/">← All tests</a></div>`);
     }
   }
   if (route.name !== 'editor' || route.id !== id) return;
-  doc = { title: src.title, intro: src.intro, tests: withKeys(src.tests) };
+  doc = { title: src.title, intro: src.intro, tests: withKeys(src.tests), published: Boolean(src.published) };
   if (!doc.tests.length) doc.tests.push(blankTest());
-  const back = id != null ? `#/suite/${id}` : '#/';
+  $('#md-text').value = '';
+  updateCount();
   paint(`
-    <a class="btn small back" href="${back}">← ${id != null ? 'Back to the tests' : 'All tests'}</a>
+    <a class="btn small back" href="#/">← All tests</a>
     <p class="eyebrow">${id != null ? 'Edit tests' : 'New tests'}</p>
-    <div class="page-head"><h1>${id != null ? esc(src.title) : 'Write a test document'}</h1></div>
-    <p class="meta">// ${id != null ? 'answers stay with every test you keep' : 'fill in the boxes, or paste a .md file below'}</p>
+    <div class="page-head">
+      <h1>${id != null ? esc(src.title) : 'Write a test document'}</h1>
+      ${id != null ? `<span class="tag ${doc.published ? 'boxed' : 'draft'}">${doc.published ? 'Published' : 'Unpublished'}</span>` : ''}
+    </div>
+    <p class="meta">// ${id != null ? 'answers stay with every test you keep' : 'fill in the boxes, or paste a .md file'}</p>
 
     <section class="card editor-doc">
       <div class="card-head"><span class="eyebrow">Document</span><span class="tag" id="block-count"></span></div>
@@ -1171,31 +1386,18 @@ async function showEditor() {
     </section>
 
     <div id="blocks"></div>
-    <button type="button" class="btn add-block" id="add-block">+ Add test</button>
-
-    <details class="card paste" id="paste">
-      <summary class="card-head"><span>Paste a .md file instead</span></summary>
-      <div class="card-body">
-        <p class="muted">Each test starts with a line like <code>## Test 1 - Title: …</code>. Loading it fills the form above,
-          where you can check it before ${id != null ? 'saving' : 'publishing'}.</p>
-        <label class="btn small file-btn">Upload .md file
-          <input type="file" id="md-file" class="sr-only" accept=".md,.markdown,.txt,text/markdown,text/plain">
-        </label>
-        <label class="label" for="md-text">Test document</label>
-        <textarea id="md-text" class="md-input" placeholder="# Resources&#10;&#10;## Test 1 - Title: …"></textarea>
-        <div class="actions">
-          <button type="button" class="btn small" id="md-load" disabled>Load into the form</button>
-          <span class="hint" id="md-count">0 tests found</span>
-        </div>
-      </div>
-    </details>
+    <div class="editor-tools">
+      <button type="button" class="btn" id="add-block">+ Add test</button>
+      <button type="button" class="btn" id="open-paste">Paste a .md file…</button>
+    </div>
 
     <div class="editor-bar">
-      ${id != null ? '' : '<label class="check"><input type="checkbox" id="md-notify" checked> Notify testers</label>'}
+      <label class="check" ${doc.published ? 'hidden' : ''}><input type="checkbox" id="md-notify" checked> Notify testers when published</label>
       <p class="error" id="editor-error" role="alert"></p>
       <div class="actions">
-        <button type="button" class="btn primary" id="save-doc">${id != null ? 'Save changes' : 'Publish'}</button>
-        <a class="btn" href="${back}">Cancel</a>
+        <button type="button" class="btn primary" data-publish="1">Publish</button>
+        <button type="button" class="btn" data-publish="0">Unpublish</button>
+        <a class="btn" href="#/">Cancel</a>
       </div>
     </div>`);
   grow($('#doc-intro'));
@@ -1211,17 +1413,17 @@ function renderBlocks() {
       <div class="item-head card-head">
         <input class="title-input" value="${esc(t.title)}" maxlength="200" placeholder="Test title" aria-label="Title of test ${i + 1}">
         <span class="tag">Test ${String(i + 1).padStart(2, '0')}</span>
-        <button type="button" class="link" data-toggle-block="${t.key}" aria-expanded="${t.open}">${t.open ? 'Hide' : 'Show'}</button>
+        <button type="button" class="btn small" data-toggle-block="${t.key}" aria-expanded="${t.open}">${t.open ? 'Hide' : 'Show'}</button>
       </div>
       <div class="card-body">
         ${untouched ? `<p class="note">Published before the editor existed. Leave the boxes empty to keep these steps, or fill them in to replace them.</p>
-          <details class="steps"><summary><span class="show">Show published steps</span><span class="hide">Hide published steps</span></summary>
+          <details class="steps"><summary class="btn small"><span class="show">Show published steps</span><span class="hide">Hide published steps</span></summary>
             <div class="md">${t.legacy_html}</div></details>` : ''}
         ${SECTIONS.map((h, s) => `
           <label class="label" for="b${t.key}s${s}">${esc(h)}</label>
           <textarea class="auto" id="b${t.key}s${s}" data-sec="${s}" rows="2" placeholder="${esc(HINTS[s])}">${esc(t.sections[h] ?? '')}</textarea>`).join('')}
         ${t.extra ? '<p class="hint">This test has extra headings of its own. They are kept as they are.</p>' : ''}
-        <div class="actions"><button type="button" class="link danger" data-del-block="${t.key}">Delete this test</button></div>
+        <div class="actions"><button type="button" class="btn small warn" data-del-block="${t.key}">Delete this test</button></div>
       </div>
     </article>`;
   }).join('');
@@ -1240,29 +1442,30 @@ function readEditor() {
   }));
 }
 
-async function saveDoc() {
+// Publish and Unpublish both save; they differ only in whether testers can open the document.
+async function saveDoc(published) {
   readEditor();
-  const button = $('#save-doc');
+  if (!published && doc.published && !(await ask('Unpublish these tests?',
+    'Testers can no longer open them, and their bell alerts go. Their answers are kept for when you publish again.', 'Unpublish'))) return;
+  const buttons = main.querySelectorAll('[data-publish]');
   $('#editor-error').textContent = '';
-  button.disabled = true;
+  buttons.forEach(b => (b.disabled = true));
   try {
     const body = {
       title: doc.title,
       intro: doc.intro,
       tests: doc.tests.map(({ id, title, sections, extra }) => ({ id, title, sections, extra })),
+      published,
+      notify: !doc.published && $('#md-notify').checked, // an already published document never re-alerts
     };
-    if (route.id != null) {
-      await api(`/api/suites/${route.id}`, send('PUT', body));
-      toast('Changes saved');
-      location.hash = `#/suite/${route.id}`;
-    } else {
-      const { id } = await api('/api/suites', send('POST', { ...body, notify: $('#md-notify').checked }));
-      location.hash = `#/suite/${id}`;
-    }
+    if (route.id != null) await api(`/api/suites/${route.id}`, send('PUT', body));
+    else await api('/api/suites', send('POST', body));
+    toast(published ? `${doc.title.trim()} is published` : `${doc.title.trim()} is saved, unpublished. Only you can see it.`);
+    location.hash = '#/';
   } catch (err) {
     $('#editor-error').textContent = err.message;
   } finally {
-    button.disabled = false;
+    buttons.forEach(b => (b.disabled = false));
   }
 }
 
@@ -1271,29 +1474,53 @@ function updateCount() {
   const n = countTests($('#md-text').value);
   $('#md-count').textContent = `${plural(n, 'test')} found`;
   $('#md-load').disabled = !n;
+  $('#md-append').disabled = !n;
 }
-async function loadMdFile(input) {
-  const file = input.files[0];
+// A new document is filled from the file. An existing one can take the file's tests at the end
+// (its title, intro and answered tests stay) or be replaced by it.
+function openPaste() {
+  const editing = route.id != null;
+  $('#md-help').innerHTML = `Each test starts with a line like <code>## Test 1 - Title: …</code>. ${editing
+    ? '<b>Add to the end</b> keeps every test you have and adds the file\'s tests after them. <b>Replace all</b> swaps the whole form for the file.'
+    : 'Loading it fills the form, where you can check it before publishing.'}`;
+  $('#md-append').hidden = !editing;
+  $('#md-load').textContent = editing ? 'Replace all' : 'Load into the form';
+  $('#paste-md').showModal();
+}
+$('#paste-md').addEventListener('input', e => e.target.id === 'md-text' && updateCount());
+$('#md-file').addEventListener('change', async e => {
+  const file = e.target.files[0];
   if (!file) return;
   $('#md-text').value = await file.text();
-  input.value = '';
+  e.target.value = '';
   updateCount();
-}
-async function loadMd() {
+});
+$('#md-load').addEventListener('click', safe(() => loadMd(false)));
+$('#md-append').addEventListener('click', safe(() => loadMd(true)));
+
+async function loadMd(append) {
   readEditor();
   const written = doc.title.trim() || doc.tests.some(t => t.title.trim() || SECTIONS.some(h => t.sections[h].trim()));
-  if (written && !(await ask('Replace the form with this file?',
+  if (!append && written && !(await ask('Replace the form with this file?',
     route.id != null
-      ? 'Every test in the form is replaced by the ones in the file. When you save, tests that are no longer there lose their answers, feedback and images.'
+      ? 'Every test in the form is replaced by the ones in the file. When you publish, tests that are no longer there lose their answers, feedback and images.'
       : 'The title, intro and every test you have written are replaced by the ones in the file.', 'Replace'))) return;
   const src = await api('/api/suites/parse', send('POST', { markdown: $('#md-text').value }));
-  doc = { title: src.title, intro: src.intro, tests: withKeys(src.tests) };
+  $('#paste-md').close();
+  if (append) {
+    const added = withKeys(src.tests); // no ids, so they are saved as new tests
+    doc.tests.push(...added);
+    renderBlocks();
+    $(`[data-block="${added[0].key}"]`).scrollIntoView({ behavior: 'smooth' });
+    toast(`${plural(added.length, 'test')} added. Check them, then publish.`);
+    return;
+  }
+  doc = { ...doc, title: src.title, intro: src.intro, tests: withKeys(src.tests) };
   $('#doc-title').value = doc.title;
   $('#doc-intro').value = doc.intro;
   grow($('#doc-intro'));
   renderBlocks();
-  $('#paste').open = false;
-  toast(`${plural(doc.tests.length, 'test')} loaded. Check them, then ${route.id != null ? 'save' : 'publish'}.`);
+  toast(`${plural(doc.tests.length, 'test')} loaded. Check them, then publish.`);
 }
 
 $('#lightbox').addEventListener('click', () => $('#lightbox').close());

@@ -1,5 +1,5 @@
 {
-  "name": "tester-manager",
+  "name": "uat-manager",
   "private": true,
   "description": "Small tester manager: admin publishes tests, testers answer them live.",
   "scripts": {
